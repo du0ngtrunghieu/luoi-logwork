@@ -75,19 +75,15 @@ func executeEstimate() {
 		fmt.Println("Endpoint type not supported")
 	}
 
-	tickets, err := projectTracking.GetTicketToLog()
+	tickets, err := projectTracking.GetTicketToEst()
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	error := projectTracking.FillEstimate(tickets)
-	if error != nil {
-		fmt.Println(error)
-		return
+	if err := projectTracking.AddEstForTicket(tickets); err != nil {
+		fmt.Println("Error updating estimates:", err)
 	}
-
-	fmt.Println(tickets)
 
 }
 func init() {

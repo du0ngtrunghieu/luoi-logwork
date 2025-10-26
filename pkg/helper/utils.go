@@ -2,10 +2,11 @@ package helper
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
-func stringSimilarity(s1, s2 string) float64 {
+func StringSimilarity(s1, s2 string) float64 {
 	s1, s2 = strings.ToLower(strings.TrimSpace(s1)), strings.ToLower(strings.TrimSpace(s2))
 	if s1 == s2 {
 		return 1.0
@@ -118,4 +119,46 @@ func FormatEstimate(seconds int64) string {
 	}
 
 	return result
+}
+
+// extractKeywords: tách các từ dài >= minLen, loại bỏ ký tự không phải chữ/ số
+func ExtractKeywords(s string, minLen int) []string {
+	re := regexp.MustCompile(`[^\p{L}\p{N}]+`) // split on non letter/number (unicode-aware)
+	parts := re.Split(strings.ToLower(strings.TrimSpace(s)), -1)
+
+	seen := map[string]bool{}
+	keywords := []string{}
+	for _, p := range parts {
+		if len(p) >= minLen {
+			if !seen[p] {
+				seen[p] = true
+				keywords = append(keywords, p)
+			}
+		}
+		// stop early if too many keywords
+		if len(keywords) >= 6 {
+			break
+		}
+	}
+	return keywords
+}
+
+// buildJQLForKeywords: tạo JQL phần tìm summary ~ "kw1" OR summary ~ "kw2" ...
+func BuildJQLForKeywords(keywords []string) string {
+	clauses := []string{}
+	for _, kw := range keywords {
+		// escape double quotes if any (very rare after extractKeywords)
+		kwEsc := strings.ReplaceAll(kw, `"`, `\"`)
+		clauses = append(clauses, fmt.Sprintf(`summary ~ "%s"`, kwEsc))
+	}
+	return strings.Join(clauses, " OR ")
+}
+
+func SecondsToJiraString(seconds int64) string {
+	hours := seconds / 3600
+	minutes := (seconds % 3600) / 60
+	if minutes == 0 {
+		return fmt.Sprintf("%dh", hours)
+	}
+	return fmt.Sprintf("%dh %dm", hours, minutes)
 }

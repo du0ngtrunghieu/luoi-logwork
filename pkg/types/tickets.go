@@ -5,4 +5,5 @@ type Ticket struct {
 	Summary         string
 	Est             int64
 	EstimatedLogged int64
+	Status          string
 }
