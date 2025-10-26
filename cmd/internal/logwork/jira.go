@@ -6,15 +6,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/andygrunwald/go-jira"
 	"github.com/du0ngtrunghieu/luoi-logwork/pkg/types"
-
-	"bytes"
-	"encoding/json"
-	"io"
-	"net/http"
 )
 
 type Jira struct {
@@ -47,12 +43,13 @@ func NewJira(endpoint string, userName string, apiToken string) *Jira {
 func (j *Jira) GetTicketToLog() ([]types.Ticket, error) {
 	// JQL query to fetch your tickets. Customize this query as needed.
 	fmt.Println("----------------Ticket able to log-------------------")
-	jql := fmt.Sprintf(`assignee = "%s" AND status IN (Resolved, "In Progress") AND type != Epic ORDER BY created DESC`, j.userName)
+	jql := fmt.Sprintf(`assignee = "%s" AND status IN (Open, "In Progress", "PAUSED") AND type != Epic AND type != Bug ORDER BY created DESC`, j.userName)
 
 	ticketList := []types.Ticket{}
 
 	issues, _, err := j.client.Issue.SearchV2JQL(jql, &jira.SearchOptionsV2{
-		MaxResults: 10, // Adjust the number of results as needed
+		MaxResults: 1000, // Adjust the number of results as needed
+		Fields:     []string{"summary", "description", "issuetype", "status", "priority", "project", "timeoriginalestimate", "timespent"},
 	})
 	if err != nil {
 		log.Fatalf("Error fetching JIRA issues: %v", err)
@@ -60,10 +57,12 @@ func (j *Jira) GetTicketToLog() ([]types.Ticket, error) {
 
 	// Print the fetched issues
 	for _, issue := range issues {
-		fmt.Printf("Issue: %s, Summary: %s, Status: %s\n", issue.Key, issue.Fields.Summary, issue.Fields.Status.Name)
+		fmt.Printf("Issue: %s, Summary %s, Est: %s, Status: %s\n", issue.Key, issue.Fields.Summary, FormatEstimate(int64(issue.Fields.TimeOriginalEstimate)), issue.Fields.Status.Name)
 		ticketList = append(ticketList, types.Ticket{
-			ID:      issue.Key,
-			Summary: issue.Fields.Summary,
+			ID:              issue.Key,
+			Summary:         issue.Fields.Summary,
+			Est:             int64(issue.Fields.TimeOriginalEstimate),
+			EstimatedLogged: int64(issue.Fields.TimeSpent),
 		})
 	}
 	return ticketList, nil
@@ -100,7 +99,8 @@ func (j *Jira) GetDayToLog() ([]types.LogWorkStatus, error) {
 	jql := fmt.Sprintf(`assignee = "%s" ORDER BY created DESC`, j.userName)
 
 	issues, _, err := j.client.Issue.SearchV2JQL(jql, &jira.SearchOptionsV2{
-		MaxResults: 100, // Adjust the number of results as needed
+		MaxResults: 1000, // Adjust the number of results as needed
+		Fields:     []string{"summary", "description", "issuetype", "status", "priority", "project"},
 	})
 	if err != nil {
 		log.Fatalf("Error fetching JIRA issues: %v", err)
@@ -136,6 +136,9 @@ func (j *Jira) GetDayToLog() ([]types.LogWorkStatus, error) {
 	return logworkList, nil
 }
 
+// func (j *Jira) GetEstimate() ([]types.LogWorkStatus, error) {
+// }
+
 func (j *Jira) LogWork(ticket []types.Ticket, logworkList []types.LogWorkStatus) error {
 	logActionList, _ := defaultLogWorkAlgorithm(ticket, logworkList)
 
@@ -149,6 +152,8 @@ func (j *Jira) LogWork(ticket []types.Ticket, logworkList []types.LogWorkStatus)
 	fmt.Print("You sure to start logging work? [y/n]: ")
 	status, _ := reader.ReadString('\n')
 	status = status[:len(status)-1]
+
+	status = strings.ReplaceAll(status, "\r", "")
 
 	if status == "n" {
 		return nil
@@ -171,46 +176,81 @@ func (j *Jira) LogWork(ticket []types.Ticket, logworkList []types.LogWorkStatus)
 		defer response.Body.Close()
 
 		fmt.Printf("Work logged to issue %s: %s successfully.\n", logActionList[i].TicketToLog.ID, logActionList[i].TicketToLog.Summary)
+
+		action := logActionList[i]
+		// -----------------------------
+		// Check status and transition
+		// -----------------------------
+		issue, _, err := j.client.Issue.Get(action.TicketToLog.ID, nil)
+		if err != nil {
+			log.Printf("⚠️  Cannot fetch issue %s details: %v\n", action.TicketToLog.ID, err)
+			continue
+		}
+
+		if strings.EqualFold(issue.Fields.Status.Name, "Open") {
+			transitions, _, err := j.client.Issue.GetTransitions(action.TicketToLog.ID)
+			if err != nil {
+				log.Printf("⚠️  Cannot get transitions for %s: %v\n", action.TicketToLog.ID, err)
+				continue
+			}
+
+			var pauseTransitionID string
+			for _, t := range transitions {
+				if strings.EqualFold(t.Name, "PAUSE") {
+					pauseTransitionID = t.ID
+					break
+				}
+			}
+
+			if pauseTransitionID == "" {
+				log.Printf("⚠️  No 'Pause' transition found for issue %s\n", action.TicketToLog.ID)
+				continue
+			}
+
+			_, err = j.client.Issue.DoTransition(action.TicketToLog.ID, pauseTransitionID)
+			if err != nil {
+				log.Printf("❌ Failed to move issue %s to Pause: %v\n", action.TicketToLog.ID, err)
+			} else {
+				fmt.Printf("🟡 Issue %s transitioned to 'Pause'\n", action.TicketToLog.ID)
+			}
+		}
 	}
 
 	return nil
 }
 
-func (j *Jira) searchIssuesByJQL(jql string, maxResults int) ([]jira.Issue, error) {
-	url := fmt.Sprintf("%s/rest/api/3/search/jql", j.endpoint)
-
-	payload := fmt.Sprintf(`{
-		"jql": "%s",
-		"maxResults": %d,
-		"fields": ["summary", "status", "assignee"]
-	}`, jql, maxResults)
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(payload)))
-	if err != nil {
-		return nil, err
+func FormatEstimate(seconds int64) string {
+	if seconds <= 0 {
+		return "0s"
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.SetBasicAuth(j.userName, j.apiToken)
+	const (
+		secondsPerHour = 3600
+		hoursPerDay    = 8
+		daysPerWeek    = 5
+	)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	totalHours := seconds / secondsPerHour
+	weeks := totalHours / (hoursPerDay * daysPerWeek)
+	days := (totalHours % (hoursPerDay * daysPerWeek)) / hoursPerDay
+	hours := totalHours % hoursPerDay
 
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("JIRA API error: %s", string(body))
+	// Add minutes for precision
+	minutes := (seconds % secondsPerHour) / 60
+
+	result := ""
+	if weeks > 0 {
+		result += fmt.Sprintf("%dw ", weeks)
+	}
+	if days > 0 {
+		result += fmt.Sprintf("%dd ", days)
+	}
+	if hours > 0 {
+		result += fmt.Sprintf("%dh ", hours)
+	}
+	if minutes > 0 {
+		result += fmt.Sprintf("%dm", minutes)
 	}
 
-	var result struct {
-		Issues []jira.Issue `json:"issues"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	return result.Issues, nil
+	return result
 }

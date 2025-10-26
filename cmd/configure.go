@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/du0ngtrunghieu/luoi-logwork/cmd/internal/configure"
 	"github.com/du0ngtrunghieu/luoi-logwork/pkg/types"
@@ -34,6 +35,7 @@ func configureConfig() error {
 		fmt.Print("Configuration Exists, Overwrite? [y/n]: ")
 		overwrite, _ := reader.ReadString('\n')
 		overwrite = overwrite[:len(overwrite)-1]
+		overwrite = strings.ReplaceAll(overwrite, "\r", "")
 
 		if overwrite == "n" {
 			return nil
