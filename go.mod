@@ -2,10 +2,12 @@ module github.com/du0ngtrunghieu/luoi-logwork
 
 go 1.22.3
 
-require github.com/spf13/cobra v1.8.0
+require (
+	github.com/andygrunwald/go-jira v1.16.0
+	github.com/spf13/cobra v1.8.0
+)
 
 require (
-	github.com/andygrunwald/go-jira v1.16.0 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.4.2 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
