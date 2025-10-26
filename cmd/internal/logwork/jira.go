@@ -10,6 +10,11 @@ import (
 
 	"github.com/andygrunwald/go-jira"
 	"github.com/du0ngtrunghieu/luoi-logwork/pkg/types"
+
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
 )
 
 type Jira struct {
@@ -46,7 +51,7 @@ func (j *Jira) GetTicketToLog() ([]types.Ticket, error) {
 
 	ticketList := []types.Ticket{}
 
-	issues, _, err := j.client.Issue.Search(jql, &jira.SearchOptions{
+	issues, _, err := j.client.Issue.SearchV2JQL(jql, &jira.SearchOptionsV2{
 		MaxResults: 10, // Adjust the number of results as needed
 	})
 	if err != nil {
@@ -94,7 +99,7 @@ func (j *Jira) GetDayToLog() ([]types.LogWorkStatus, error) {
 	// JQL query to fetch issues assigned to you
 	jql := fmt.Sprintf(`assignee = "%s" ORDER BY created DESC`, j.userName)
 
-	issues, _, err := j.client.Issue.Search(jql, &jira.SearchOptions{
+	issues, _, err := j.client.Issue.SearchV2JQL(jql, &jira.SearchOptionsV2{
 		MaxResults: 100, // Adjust the number of results as needed
 	})
 	if err != nil {
@@ -169,4 +174,43 @@ func (j *Jira) LogWork(ticket []types.Ticket, logworkList []types.LogWorkStatus)
 	}
 
 	return nil
+}
+
+func (j *Jira) searchIssuesByJQL(jql string, maxResults int) ([]jira.Issue, error) {
+	url := fmt.Sprintf("%s/rest/api/3/search/jql", j.endpoint)
+
+	payload := fmt.Sprintf(`{
+		"jql": "%s",
+		"maxResults": %d,
+		"fields": ["summary", "status", "assignee"]
+	}`, jql, maxResults)
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(payload)))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth(j.userName, j.apiToken)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("JIRA API error: %s", string(body))
+	}
+
+	var result struct {
+		Issues []jira.Issue `json:"issues"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return result.Issues, nil
 }
