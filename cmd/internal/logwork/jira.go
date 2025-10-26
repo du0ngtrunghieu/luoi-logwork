@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/TranThang-2804/auto-logwork/pkg/types"
 	"github.com/andygrunwald/go-jira"
+	"github.com/du0ngtrunghieu/luoi-logwork/pkg/types"
 )
 
 type Jira struct {
@@ -125,7 +125,7 @@ func (j *Jira) GetDayToLog() ([]types.LogWorkStatus, error) {
 	}
 
 	for i := range logworkList {
-    fmt.Printf("%s: Time Spent: %d Hours\n", time.Weekday(i), logworkList[i].TimeSpent/3600)
+		fmt.Printf("%s: Time Spent: %d Hours\n", time.Weekday(i), logworkList[i].TimeSpent/3600)
 	}
 
 	return logworkList, nil
@@ -165,7 +165,7 @@ func (j *Jira) LogWork(ticket []types.Ticket, logworkList []types.LogWorkStatus)
 		}
 		defer response.Body.Close()
 
-    fmt.Printf("Work logged to issue %s: %s successfully.\n", logActionList[i].TicketToLog.ID, logActionList[i].TicketToLog.Summary)
+		fmt.Printf("Work logged to issue %s: %s successfully.\n", logActionList[i].TicketToLog.ID, logActionList[i].TicketToLog.Summary)
 	}
 
 	return nil

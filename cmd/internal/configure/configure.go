@@ -5,8 +5,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/TranThang-2804/auto-logwork/pkg/constant"
-	"github.com/TranThang-2804/auto-logwork/pkg/types"
+	"github.com/du0ngtrunghieu/luoi-logwork/pkg/constant"
+	"github.com/du0ngtrunghieu/luoi-logwork/pkg/types"
 )
 
 func GetConfigFilePath() string {
@@ -27,25 +27,25 @@ func ReadConfig(config *types.Config) {
 
 	if configFileExist {
 		file, err := os.Open(GetConfigFilePath())
-    defer file.Close()
+		defer file.Close()
 
 		if err != nil {
-      log.Print(err)
+			log.Print(err)
 			return
 		}
-    
-    decoder := json.NewDecoder(file)
 
-    err = decoder.Decode(&config)
+		decoder := json.NewDecoder(file)
 
-    if err != nil {
-      log.Print(err)
-      return
-    }
+		err = decoder.Decode(&config)
+
+		if err != nil {
+			log.Print(err)
+			return
+		}
 
 	} else {
-		log.Print("You haven't config credentials, to config, run: auto-logwork configure")
-    return
+		log.Print("You haven't config credentials, to config, run: luoi-logwork configure")
+		return
 	}
 }
 
@@ -58,8 +58,8 @@ func WriteConfig(config *types.Config) error {
 
 	defer file.Close()
 
-  encoder := json.NewEncoder(file)
-  err = encoder.Encode(config)
+	encoder := json.NewEncoder(file)
+	err = encoder.Encode(config)
 
 	return err
 }

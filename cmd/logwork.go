@@ -6,9 +6,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/TranThang-2804/auto-logwork/cmd/internal/configure"
-	"github.com/TranThang-2804/auto-logwork/cmd/internal/logwork"
-	"github.com/TranThang-2804/auto-logwork/pkg/types"
+	"github.com/du0ngtrunghieu/luoi-logwork/cmd/internal/configure"
+	"github.com/du0ngtrunghieu/luoi-logwork/cmd/internal/logwork"
+	"github.com/du0ngtrunghieu/luoi-logwork/pkg/types"
 	"github.com/spf13/cobra"
 )
 

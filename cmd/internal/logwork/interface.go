@@ -1,7 +1,7 @@
 package logwork
 
 import (
-  "github.com/TranThang-2804/auto-logwork/pkg/types"
+	"github.com/du0ngtrunghieu/luoi-logwork/pkg/types"
 )
 
 type ProjectTracking interface {

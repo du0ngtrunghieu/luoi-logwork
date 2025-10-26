@@ -8,11 +8,11 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:     "auto-logwork",
+	Use:     "luoi-logwork",
 	Version: "v1.0.0",
-	Short:   "Auto logwork so you don't have to do it",
+	Short:   "Tôi lười logwork",
 	Long: `
-Developed by Tommy
+Developed by Duong Trung Hieu
   `,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
