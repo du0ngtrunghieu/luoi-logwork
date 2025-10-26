@@ -136,8 +136,9 @@ func (j *Jira) GetDayToLog() ([]types.LogWorkStatus, error) {
 	return logworkList, nil
 }
 
-// func (j *Jira) GetEstimate() ([]types.LogWorkStatus, error) {
-// }
+func (j *Jira) FillEstimate(ticket []types.Ticket) error {
+	return nil
+}
 
 func (j *Jira) LogWork(ticket []types.Ticket, logworkList []types.LogWorkStatus) error {
 	logActionList, _ := defaultLogWorkAlgorithm(ticket, logworkList)

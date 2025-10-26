@@ -22,6 +22,15 @@ var logworkCmd = &cobra.Command{
 	},
 }
 
+var estimateCmd = &cobra.Command{
+	Use:   "est",
+	Short: "Auto fill estimate",
+	Long:  ``,
+	Run: func(cmd *cobra.Command, args []string) {
+		executeEstimate()
+	},
+}
+
 func execute() {
 	config := &types.Config{}
 	configure.ReadConfig(config)
@@ -54,8 +63,36 @@ func execute() {
 	}
 }
 
+func executeEstimate() {
+	config := &types.Config{}
+	configure.ReadConfig(config)
+	var projectTracking logwork.ProjectTracking
+
+	switch config.EndpointType {
+	case "jira":
+		projectTracking = logwork.NewJira(config.Endpoint, config.Username, config.ApiToken)
+	default:
+		fmt.Println("Endpoint type not supported")
+	}
+
+	tickets, err := projectTracking.GetTicketToLog()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	error := projectTracking.FillEstimate(tickets)
+	if error != nil {
+		fmt.Println(error)
+		return
+	}
+
+	fmt.Println(tickets)
+
+}
 func init() {
 	rootCmd.AddCommand(logworkCmd)
+	rootCmd.AddCommand(estimateCmd)
 
 	// Here you will define your flags and configuration settings.
 
