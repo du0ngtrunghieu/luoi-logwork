@@ -228,7 +228,7 @@ func (j *Jira) GetTicketToEst() ([]types.Ticket, error) {
 	fmt.Println("----------------Ticket need to estimate (searching whole Jira)-------------------")
 
 	// 1) Lấy các ticket của user để xử lý (các ticket bạn muốn fill)
-	jqlForUser := fmt.Sprintf(`assignee = "%s" AND status IN (Open, "In Progress", "PAUSED", "DONE") AND type != Epic AND type != Bug ORDER BY created DESC`, j.userName)
+	jqlForUser := fmt.Sprintf(`assignee = "%s" AND type IN (Sub-task, Task) AND status IN (Open, Backlog, Paused, "In Review", "In Build", Reopened) ORDER BY created DESC`, j.userName)
 
 	issues, _, err := j.client.Issue.SearchV2JQL(jqlForUser, &jira.SearchOptionsV2{
 		MaxResults: 1000,
@@ -256,24 +256,22 @@ func (j *Jira) GetTicketToEst() ([]types.Ticket, error) {
 
 	for idx := range ticketList {
 		t := &ticketList[idx]
-		// chỉ quan tâm Open + chưa có estimate
-		if !strings.EqualFold(t.Status, "Open") || t.Est > 0 {
+		// Chỉ quan tâm Open + chưa có estimate
+		if t.Est > 0 {
 			continue
 		}
 
 		fmt.Printf("Searching matches for: %s (%s)\n", t.ID, t.Summary)
 
-		// tạo keywords từ summary (loại các từ ngắn <= 2 ký tự)
-		keywords := helper.ExtractKeywords(t.Summary, 3)
+		// Tạo keywords từ summary, ưu tiên từ dài hơn (>= 4 ký tự) để tăng độ đặc trưng
+		keywords := helper.ExtractKeywords(t.Summary, 4)
 		if len(keywords) == 0 {
 			fmt.Printf(" ⚠️  No useful keywords found for %s, skipping\n", t.ID)
 			continue
 		}
 
-		// build JQL: tìm các issue trong toàn Jira có summary chứa 1 trong các keyword và có estimate
-		// (giới hạn kết quả để tránh quá nhiều fetch)
+		// Build JQL: tìm các issue có summary chứa ít nhất một keyword và có estimate
 		jqlSearch := helper.BuildJQLForKeywords(keywords)
-		// thêm điều kiện có timeoriginalestimate > 0
 		jqlSearch = fmt.Sprintf("(%s) AND timeoriginalestimate IS NOT EMPTY ORDER BY created DESC", jqlSearch)
 
 		candidates, _, err := j.client.Issue.SearchV2JQL(jqlSearch, &jira.SearchOptionsV2{
@@ -290,27 +288,31 @@ func (j *Jira) GetTicketToEst() ([]types.Ticket, error) {
 			continue
 		}
 
-		// evaluate similarity over candidates and pick best
+		// Evaluate similarity over candidates and pick best
 		bestScore := 0.0
 		bestEst := int64(0)
 		bestSummary := ""
+		bestID := ""
 		for _, c := range candidates {
 			cSummary := c.Fields.Summary
 			cEst := int64(c.Fields.TimeOriginalEstimate)
 			if cEst <= 0 {
 				continue
 			}
+			// Tăng độ chính xác bằng cách sử dụng n-gram hoặc fuzzy matching nếu có
 			score := helper.StringSimilarity(t.Summary, cSummary)
 			if score > bestScore {
 				bestScore = score
 				bestEst = cEst
 				bestSummary = cSummary
+				bestID = c.Key
 			}
 		}
 
-		if bestScore >= 0.8 && bestEst > 0 {
+		// Tăng threshold lên 0.95 để match chặt chẽ hơn
+		if bestScore >= 0.95 && bestEst > 0 {
 			t.Est = bestEst
-			fmt.Printf(" ✅ Auto-filled %s => %s (matched with \"%s\", score=%.2f)\n", t.ID, helper.FormatEstimate(t.Est), bestSummary, bestScore)
+			fmt.Printf(" ✅ Auto-filled %s => %s (matched with \"%s\", score=%.2f, task: %s)\n", t.ID, helper.FormatEstimate(t.Est), bestSummary, bestScore, bestID)
 		} else {
 			fmt.Printf(" ❌  No sufficiently similar candidate for %s (best score %.2f)\n", t.ID, bestScore)
 		}

@@ -80,7 +80,6 @@ func executeEstimate() {
 		fmt.Println(err)
 		return
 	}
-
 	if err := projectTracking.AddEstForTicket(tickets); err != nil {
 		fmt.Println("Error updating estimates:", err)
 	}
