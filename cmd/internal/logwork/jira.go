@@ -361,3 +361,180 @@ func (j *Jira) AddEstForTicket(ticketList []types.Ticket) error {
 
 	return nil
 }
+
+func (j *Jira) GetTicketToEstV2() ([]types.Ticket, error) {
+	fmt.Println("----------------Ticket need to estimate (searching whole Jira)-------------------")
+
+	// 1) Lấy các ticket của user để xử lý
+	jqlForUser := fmt.Sprintf(`assignee = "%s" AND type IN (Sub-task, Task) AND status IN (Open, Backlog, Paused, "In Review", "In Build", Reopened) ORDER BY created DESC`, j.userName)
+
+	issues, _, err := j.client.Issue.SearchV2JQL(jqlForUser, &jira.SearchOptionsV2{
+		MaxResults: 1000,
+		Fields:     []string{"summary", "status", "timeoriginalestimate", "timespent", "project", "labels", "parent", "created"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error fetching user issues: %v", err)
+	}
+
+	ticketList := []types.Ticket{}
+	for _, issue := range issues {
+		ticketList = append(ticketList, types.Ticket{
+			ID:              issue.Key,
+			Summary:         issue.Fields.Summary,
+			Status:          issue.Fields.Status.Name,
+			Est:             int64(issue.Fields.TimeOriginalEstimate),
+			EstimatedLogged: int64(issue.Fields.TimeSpent),
+			Project:         issue.Fields.Project.Key,
+			Labels:          issue.Fields.Labels,
+			Parent:          issue.Fields.Parent.Key,
+			Created:         issue.Fields.Created,
+		})
+	}
+
+	fmt.Printf("Fetched %d tickets assigned to %s\n", len(ticketList), j.userName)
+
+	// 2) Với mỗi ticket cần fill (Open và Est == 0) -> search toàn Jira
+	fmt.Println("\n----------------Auto-fill estimate by searching-------------------")
+
+	for idx := range ticketList {
+		t := &ticketList[idx]
+		// Chỉ quan tâm Open + chưa có estimate
+		if !strings.EqualFold(t.Status, "Open") || t.Est > 0 {
+			continue
+		}
+
+		fmt.Printf("Searching matches for: %s (%s)\n", t.ID, t.Summary)
+
+		// Tạo keywords từ summary, ưu tiên từ dài hơn (>= 4 ký tự)
+		keywords := helper.ExtractKeywords(t.Summary, 4)
+		if len(keywords) == 0 {
+			fmt.Printf(" ⚠️  No useful keywords found for %s, skipping\n", t.ID)
+			continue
+		}
+
+		// Build JQL: ưu tiên ticket trong cùng project hoặc parent
+		jqlSearch := helper.BuildJQLForKeywords(keywords)
+		jqlSearch = fmt.Sprintf("(%s) AND timeoriginalestimate IS NOT EMPTY AND (project = %s OR parent = %s) ORDER BY created DESC", jqlSearch, t.Project, t.Parent)
+
+		candidates, _, err := j.client.Issue.SearchV2JQL(jqlSearch, &jira.SearchOptionsV2{
+			MaxResults: 500,
+			Fields:     []string{"summary", "timeoriginalestimate", "status", "project", "labels", "parent", "created"},
+		})
+		if err != nil {
+			log.Printf(" ⚠️  Error searching Jira for %s: %v\n", t.ID, err)
+			continue
+		}
+
+		if len(candidates) == 0 {
+			fmt.Printf(" ❌  No candidates found in Jira for %s\n", t.ID)
+			continue
+		}
+
+		// Evaluate similarity over candidates
+		bestScore := 0.0
+		bestEst := int64(0)
+		bestSummary := ""
+		bestCandidate := types.Ticket{}
+		for _, c := range candidates {
+			cEst := int64(c.Fields.TimeOriginalEstimate)
+			if cEst <= 0 {
+				continue
+			}
+
+			// Tính summary score
+			summaryScore := helper.StringSimilarity(t.Summary, c.Fields.Summary)
+
+			// Tính context score
+			contextScore := calculateContextScore(*t, types.Ticket{
+				Project: c.Fields.Project.Key,
+				Parent:  c.Fields.Parent.Key,
+				Labels:  c.Fields.Labels,
+				Created: c.Fields.Created,
+			})
+
+			// Tổng điểm = 60% summaryScore + 40% contextScore
+			totalScore := 0.6*summaryScore + 0.4*contextScore
+			if totalScore > bestScore {
+				bestScore = totalScore
+				bestEst = cEst
+				bestSummary = c.Fields.Summary
+				bestCandidate = types.Ticket{
+					ID:      c.Key,
+					Summary: c.Fields.Summary,
+					Project: c.Fields.Project.Key,
+					Parent:  c.Fields.Parent.Key,
+					Labels:  c.Fields.Labels,
+					Created: c.Fields.Created,
+				}
+			}
+		}
+
+		// Threshold 0.90 để match chặt chẽ
+		if bestScore >= 0.90 && bestEst > 0 {
+			t.Est = bestEst
+			fmt.Printf(" ✅ Auto-filled %s => %s (matched with \"%s\" (ID: %s, Project: %s, Parent: %s), score=%.2f, context=%.2f)\n",
+				t.ID, helper.FormatEstimate(t.Est), bestSummary, bestCandidate.ID, bestCandidate.Project, bestCandidate.Parent, bestScore, calculateContextScore(*t, bestCandidate))
+		} else {
+			fmt.Printf(" ❌  No sufficiently similar candidate for %s (best score %.2f)\n", t.ID, bestScore)
+		}
+	}
+
+	return ticketList, nil
+}
+
+// calculateContextScore tính điểm ngữ cảnh dựa trên project, parent, labels và thời gian
+func calculateContextScore(t, c types.Ticket) float64 {
+	contextScore := 0.0
+
+	// 1) Project matching (trọng số cao nhất: 0.4)
+	if t.Project == c.Project {
+		contextScore += 0.4
+	}
+
+	// 2) Parent (epic/sub-task) matching (trọng số 0.3)
+	if t.Parent != "" && t.Parent == c.Parent {
+		contextScore += 0.3
+	}
+
+	// 3) Labels matching (trọng số động dựa trên tỷ lệ labels chung, tối đa 0.2)
+	if len(t.Labels) > 0 && len(c.Labels) > 0 {
+		commonLabels := len(intersect(t.Labels, c.Labels))
+		totalLabels := float64(len(t.Labels) + len(c.Labels) - commonLabels)
+		if totalLabels > 0 {
+			labelScore := float64(commonLabels) / totalLabels * 0.2
+			contextScore += labelScore
+		}
+	}
+
+	// // 4) Thời gian: ưu tiên ticket gần đây hơn (trọng số 0.1)
+	// if !t.Created.Time.IsZero() && !c.Created.Time.IsZero() {
+	// 	timeDiff := t.Created.Sub(c.Created).Hours() / 24 // Chênh lệch ngày
+	// 	if timeDiff < 0 {
+	// 		timeDiff = -timeDiff
+	// 	}
+	// 	// Giảm điểm nếu cách quá 180 ngày, tối đa 0.1
+	// 	timeScore := math.Max(0, 0.1*(1-timeDiff/180))
+	// 	contextScore += timeScore
+	// }
+
+	// Chuẩn hóa contextScore về [0, 1]
+	if contextScore > 1.0 {
+		contextScore = 1.0
+	}
+	return contextScore
+}
+
+// intersect trả về các phần tử chung của hai slice string
+func intersect(a, b []string) []string {
+	set := make(map[string]bool)
+	var result []string
+	for _, item := range a {
+		set[item] = true
+	}
+	for _, item := range b {
+		if set[item] {
+			result = append(result, item)
+		}
+	}
+	return result
+}
